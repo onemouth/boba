@@ -1,0 +1,6 @@
+{
+  "api_key": "YOUR_OPENROUTER_API_KEY",
+  "model": "openai/gpt-4.1-mini",
+  "port": 8787,
+  "pairing_token": "GENERATE_WITH_BOBA_INIT"
+}

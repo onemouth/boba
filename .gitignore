@@ -1,0 +1,6 @@
+/config.json
+/boba
+/dist/
+/node_modules/
+coverage.out
+.DS_Store

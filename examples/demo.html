@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Boba — safe test page</title>
+<style>
+body { font: 17px/1.65 system-ui; max-width: 960px; margin: 60px auto; padding: 0 25px; color: #342e27; background: #f7f4ee }
+main { display: grid; grid-template-columns: 1fr 220px; gap: 35px }
+aside { background: #e8e0d2; padding: 20px; border-radius: 12px }
+input,textarea,button { font: inherit; padding: 8px; border: 1px solid #ccc; border-radius: 6px; display: block; margin: 8px 0 }
+</style>
+<h1>Boba test page</h1>
+<p>This is a disposable local test page. No real account, payment, or personal data is used.</p>
+<p><strong id="mode">Use the installed Boba userscript to test this page.</strong></p>
+<main>
+<article id="article">
+<h2>A little tea break</h2>
+<p id="intro">Boba is a tiny browser agent. Ask it to translate this text, adjust the layout, or collect the links below.</p>
+<ul><li><a href="https://example.com/">Example website</a></li><li><a href="https://violentmonkey.github.io/">Violentmonkey</a></li></ul>
+<form id="demo-form">
+<label>Name<input id="demo-name" name="name" placeholder="Your name"></label>
+<label>Notes<textarea id="demo-notes" name="notes"></textarea></label>
+<button type="submit">Submit test form</button>
+<output id="result">Not submitted</output>
+</form>
+</article>
+<aside id="sidebar"><h2>Sidebar</h2><p>Ask Boba to hide this sidebar.</p></aside>
+</main>
+<script>
+document.querySelector('#demo-form').addEventListener('submit', e => {
+  e.preventDefault();
+  document.querySelector('#result').textContent = 'Test form submitted';
+});
+</script>
+</html>

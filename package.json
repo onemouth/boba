@@ -1,0 +1,16 @@
+{
+  "name": "boba",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Development tests for the no-build userscript",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check userscript/boba.user.js",
+    "test:browser": "node --test tests/browser.firefox.cjs",
+    "demo": "node tests/dev-server.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "jsdom": "^26.1.0"
+  }
+}
