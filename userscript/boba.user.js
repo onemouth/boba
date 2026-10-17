@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boba — Tiny Browser Agent
 // @namespace    https://boba.local
-// @version      0.1.2
+// @version      0.1.3
 // @description  Operate the current page with a local OpenRouter proxy. Automatic execution; use on trusted pages.
 // @match        http://*/*
 // @match        https://*/*
@@ -21,6 +21,7 @@
 (() => {
   'use strict';
 
+  // BEGIN SHARED RUNTIME — scripts/build-devtools.cjs reuses this exact source.
   const MAX_TOOL_CHARS = 24000;
   const MAX_CONTEXT_BYTES = 2800000;
   const MAX_STEPS = 20;
@@ -265,296 +266,322 @@ Keep responses concise and in the user's language. Report changes, saved paths, 
     };
   }
 
-  // No build step: Node tests import the same code shipped to Violentmonkey.
-  if (typeof window === 'undefined' && typeof module !== 'undefined' && module.exports) {
-    module.exports = { Agent, TOOLS, createPageTools, bounded, trimContext, interruptedResults };
-    return;
-  }
+  function mountPanel(platform) {
+    const { window, document, unsafeWindow, GM_getValue, GM_setValue,
+      GM_xmlhttpRequest, GM_registerMenuCommand, GM_openInTab } = platform;
+    try {
+    // Avoid a second panel when more than one userscript manager runs Boba.
+    if (document.querySelector('boba-panel')) return;
 
-  try {
-  // Avoid a second panel when more than one userscript manager runs Boba.
-  if (document.querySelector('boba-panel')) return;
-
-  const defaults = { server: 'http://127.0.0.1:8787', token: '', shortcut: 'Alt+Shift+B' };
-  let settings = { ...defaults, ...GM_getValue('settings', {}) };
-  let busy = false;
-  let attachment = null;
-  const host = document.createElement('boba-panel');
-  host.style.cssText = 'all:initial!important;position:fixed!important;right:20px!important;bottom:20px!important;z-index:2147483647!important;display:none!important';
-  const shadow = host.attachShadow({ mode: 'closed' });
-  // Build UI with DOM APIs: innerHTML is a Trusted Types sink on sites
-  // such as YouTube. Do not create a Trusted Types policy or weaken site CSP.
-  function element(tag, attributes = {}, ...children) {
-    const node = document.createElement(tag);
-    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
-    node.append(...children);
-    return node;
-  }
-  shadow.append(
-    element('style', {}, `
-      :host{color-scheme:light}*{box-sizing:border-box}section{font:13px/1.5 system-ui,sans-serif;color:#242424;background:#faf9f6;width:380px;max-width:calc(100vw - 40px);height:530px;max-height:calc(100vh - 40px);border:1px solid #ddd7cb;border-radius:14px;box-shadow:0 14px 60px #0003;display:flex;flex-direction:column;overflow:hidden}
-      header{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e4dfd5}strong{font-size:15px}header span{flex:1;color:#777;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}button,select{font:inherit;border:1px solid #d8d1c5;background:#fff;border-radius:6px;padding:5px 9px;cursor:pointer;color:#333}button:hover{background:#eee9df}button:disabled{opacity:.5;cursor:default}
-      #log{overflow:auto;flex:1;padding:12px;min-height:80px}.entry{white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:12px;padding:8px 10px;border-radius:8px;background:#fff}.user{background:#eee7db}.tool{background:transparent;color:#777;font:11px/1.4 ui-monospace,monospace;padding:0 6px;margin-bottom:6px}.error{background:#fff0e9;color:#a43c24}.notice{font-size:11px;color:#736853;background:transparent;padding:0}
-      footer{padding:10px;border-top:1px solid #e4dfd5}textarea{width:100%;resize:vertical;min-height:64px;max-height:150px;border:1px solid #d8d1c5;border-radius:8px;background:white;padding:9px;font:13px/1.5 system-ui;color:#222}textarea:focus{outline:2px solid #b9a787}.row{display:flex;gap:6px;align-items:center;margin-top:7px}.row select{min-width:0;flex:1}#send{background:#302a23;color:#fff}#stop{color:#a43c24}#attachment{font-size:11px;color:#777}#settings{display:none;padding:12px;border-bottom:1px solid #ddd7cb}label{display:block;margin-bottom:6px;font-size:11px}input:not([type=file]){width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;color:#222;background:#fff}#image{display:none}
-    `),
-    element('section', { 'aria-label': 'Boba chat' },
-      element('header', {},
-        element('strong', {}, 'Boba'),
-        element('span', { id: 'status' }, 'Ready'),
-        element('button', { id: 'new', title: 'New chat' }, 'New'),
-        element('button', { id: 'gear', title: 'Settings' }, '⚙'),
-        element('button', { id: 'close', title: 'Hide' }, '×'),
-      ),
-      element('form', { id: 'settings' },
-        element('label', {}, 'Local server', element('input', { id: 'server', autocomplete: 'off' })),
-        element('label', {}, 'Pairing token', element('input', { id: 'token', type: 'password', autocomplete: 'off' })),
-        element('label', {}, 'Shortcut (e.g. Alt+Shift+B)', element('input', { id: 'shortcut', autocomplete: 'off' })),
-        element('button', { type: 'submit' }, 'Save & connect'),
-      ),
-      element('div', { id: 'log', role: 'log', 'aria-live': 'polite' }),
-      element('footer', {},
-        element('textarea', { id: 'input', 'aria-label': 'Instructions', placeholder: 'What should I do on this page?' }),
-        element('div', { id: 'attachment' }),
-        element('div', { class: 'row' },
-          element('select', { id: 'prompts', 'aria-label': 'Workspace prompt' },
-            element('option', { value: '' }, 'Workspace prompts…')),
-          element('button', { id: 'attach', title: 'Attach a screenshot or image' }, 'Image'),
-          element('button', { id: 'stop', disabled: '' }, 'Stop'),
-          element('button', { id: 'send' }, 'Send'),
+    const defaults = { server: platform.serverOrigin || 'http://127.0.0.1:8787', token: '', shortcut: 'Alt+Shift+B' };
+    let settings = { ...defaults, ...GM_getValue('settings', {}) };
+    let busy = false;
+    let disconnected = false;
+    let preparationController = null;
+    let attachment = null;
+    const host = document.createElement('boba-panel');
+    host.style.cssText = 'all:initial!important;position:fixed!important;right:20px!important;bottom:20px!important;z-index:2147483647!important;display:none!important';
+    const shadow = host.attachShadow({ mode: 'closed' });
+    // Build UI with DOM APIs: innerHTML is a Trusted Types sink on sites
+    // such as YouTube. Do not create a Trusted Types policy or weaken site CSP.
+    function element(tag, attributes = {}, ...children) {
+      const node = document.createElement(tag);
+      for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+      node.append(...children);
+      return node;
+    }
+    shadow.append(
+      element('style', {}, `
+        :host{color-scheme:light}*{box-sizing:border-box}section{font:13px/1.5 system-ui,sans-serif;color:#242424;background:#faf9f6;width:380px;max-width:calc(100vw - 40px);height:530px;max-height:calc(100vh - 40px);border:1px solid #ddd7cb;border-radius:14px;box-shadow:0 14px 60px #0003;display:flex;flex-direction:column;overflow:hidden}
+        header{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e4dfd5}strong{font-size:15px}header span{flex:1;color:#777;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}button,select{font:inherit;border:1px solid #d8d1c5;background:#fff;border-radius:6px;padding:5px 9px;cursor:pointer;color:#333}button:hover{background:#eee9df}button:disabled{opacity:.5;cursor:default}
+        #log{overflow:auto;flex:1;padding:12px;min-height:80px}.entry{white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:12px;padding:8px 10px;border-radius:8px;background:#fff}.user{background:#eee7db}.tool{background:transparent;color:#777;font:11px/1.4 ui-monospace,monospace;padding:0 6px;margin-bottom:6px}.error{background:#fff0e9;color:#a43c24}.notice{font-size:11px;color:#736853;background:transparent;padding:0}
+        footer{padding:10px;border-top:1px solid #e4dfd5}textarea{width:100%;resize:vertical;min-height:64px;max-height:150px;border:1px solid #d8d1c5;border-radius:8px;background:white;padding:9px;font:13px/1.5 system-ui;color:#222}textarea:focus{outline:2px solid #b9a787}.row{display:flex;gap:6px;align-items:center;margin-top:7px}.row select{min-width:0;flex:1}#send{background:#302a23;color:#fff}#stop{color:#a43c24}#attachment{font-size:11px;color:#777}#settings{display:none;padding:12px;border-bottom:1px solid #ddd7cb}label{display:block;margin-bottom:6px;font-size:11px}input:not([type=file]){width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;color:#222;background:#fff}#image{display:none}
+      `),
+      element('section', { 'aria-label': 'Boba chat' },
+        element('header', {},
+          element('strong', {}, 'Boba'),
+          element('span', { id: 'status' }, 'Ready'),
+          element('button', { id: 'new', title: 'New chat' }, 'New'),
+          element('button', { id: 'gear', title: 'Settings' }, '⚙'),
+          element('button', { id: 'close', title: 'Hide' }, '×'),
         ),
-        element('input', { id: 'image', type: 'file', accept: 'image/png,image/jpeg,image/webp' }),
+        element('form', { id: 'settings' },
+          element('label', {}, 'Local server', element('input', { id: 'server', autocomplete: 'off' })),
+          element('label', {}, 'Pairing token', element('input', { id: 'token', type: 'password', autocomplete: 'off' })),
+          element('label', {}, 'Shortcut (e.g. Alt+Shift+B)', element('input', { id: 'shortcut', autocomplete: 'off' })),
+          element('button', { type: 'submit' }, 'Save & connect'),
+        ),
+        element('div', { id: 'log', role: 'log', 'aria-live': 'polite' }),
+        element('footer', {},
+          element('textarea', { id: 'input', 'aria-label': 'Instructions', placeholder: 'What should I do on this page?' }),
+          element('div', { id: 'attachment' }),
+          element('div', { class: 'row' },
+            element('select', { id: 'prompts', 'aria-label': 'Workspace prompt' },
+              element('option', { value: '' }, 'Workspace prompts…')),
+            element('button', { id: 'attach', title: 'Attach a screenshot or image' }, 'Image'),
+            element('button', { id: 'stop', disabled: '' }, 'Stop'),
+            element('button', { id: 'send' }, 'Send'),
+          ),
+          element('input', { id: 'image', type: 'file', accept: 'image/png,image/jpeg,image/webp' }),
+        ),
       ),
-    ),
-  );
-  document.documentElement.append(host);
-  const $ = id => shadow.getElementById(id);
-  function log(kind, text) {
-    const entry = document.createElement('div');
-    entry.className = `entry ${kind}`;
-    entry.textContent = typeof text === 'string' ? text : bounded(text);
-    $('log').append(entry);
-    // Keep the UI bounded independently of model context.
-    while ($('log').children.length > 200) $('log').firstChild.remove();
-    $('log').scrollTop = $('log').scrollHeight;
-    return entry;
-  }
-  log('notice', 'Automatic execution is ON. Page data, including passwords, may be sent to OpenRouter. Use trusted/test pages. Stop does not undo changes.');
+    );
+    document.documentElement.append(host);
+    const $ = id => shadow.getElementById(id);
+    function log(kind, text) {
+      const entry = document.createElement('div');
+      entry.className = `entry ${kind}`;
+      entry.textContent = typeof text === 'string' ? text : bounded(text);
+      $('log').append(entry);
+      // Keep the UI bounded independently of model context.
+      while ($('log').children.length > 200) $('log').firstChild.remove();
+      $('log').scrollTop = $('log').scrollHeight;
+      return entry;
+    }
+    log('notice', 'Automatic execution is ON. Page data, including passwords, may be sent to OpenRouter. Use trusted/test pages. Stop does not undo changes.');
 
-  function validateSettings(next) {
-    const url = new URL(next.server);
-    if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Server must be http://127.0.0.1:PORT or http://localhost:PORT');
-    if (next.token.length < 24) throw new Error('Pairing token must be at least 24 characters.');
-    const parts = next.shortcut.toLowerCase().split('+');
-    if (parts.length < 2 || !parts.slice(0, -1).every(x => ['meta', 'ctrl', 'alt', 'shift'].includes(x)) || parts.at(-1).length !== 1) throw new Error('Use a shortcut like Alt+Shift+B.');
-    return { ...next, server: url.origin };
-  }
-  function request(path, body, signal) {
-    return new Promise((resolve, reject) => {
-      try { check(signal); validateSettings(settings); } catch (error) { reject(error); return; }
-      let control;
-      const cleanup = () => signal?.removeEventListener('abort', cancel);
-      const cancel = () => { control?.abort(); cleanup(); reject(abortError()); };
-      signal?.addEventListener('abort', cancel, { once: true });
-      const fail = message => { cleanup(); reject(new Error(message)); };
-      control = GM_xmlhttpRequest({
-        method: body === undefined ? 'GET' : 'POST', url: settings.server + path,
-        headers: { Authorization: `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
-        data: body === undefined ? undefined : JSON.stringify(body), timeout: 160000, anonymous: true,
-        onload(response) {
-          cleanup();
-          try {
-            const value = JSON.parse(response.responseText);
-            if (response.status < 200 || response.status >= 300) throw new Error(value.error?.message || `HTTP ${response.status}`);
-            resolve(value);
-          } catch (error) { reject(error); }
-        },
-        onerror: () => fail('Cannot reach Boba server. Start boba serve and check settings.'),
-        ontimeout: () => fail('Server request timed out.'),
-        onabort: () => { cleanup(); reject(abortError()); },
+    function validateSettings(next) {
+      const url = new URL(next.server);
+      if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Server must be http://127.0.0.1:PORT or http://localhost:PORT');
+      if (next.token.length < 24) throw new Error('Pairing token must be at least 24 characters.');
+      const parts = next.shortcut.toLowerCase().split('+');
+      if (parts.length < 2 || !parts.slice(0, -1).every(x => ['meta', 'ctrl', 'alt', 'shift'].includes(x)) || parts.at(-1).length !== 1) throw new Error('Use a shortcut like Alt+Shift+B.');
+      return { ...next, server: url.origin };
+    }
+    function request(path, body, signal) {
+      return new Promise((resolve, reject) => {
+        try { check(signal); validateSettings(settings); } catch (error) { reject(error); return; }
+        let control;
+        const cleanup = () => signal?.removeEventListener('abort', cancel);
+        const cancel = () => { control?.abort(); cleanup(); reject(abortError()); };
+        signal?.addEventListener('abort', cancel, { once: true });
+        const fail = message => { cleanup(); reject(new Error(message)); };
+        control = GM_xmlhttpRequest({
+          method: body === undefined ? 'GET' : 'POST', url: settings.server + path,
+          headers: { Authorization: `Bearer ${settings.token}`, 'Content-Type': 'application/json' },
+          data: body === undefined ? undefined : JSON.stringify(body), timeout: 160000, anonymous: true,
+          onload(response) {
+            cleanup();
+            try {
+              const value = JSON.parse(response.responseText);
+              if (response.status < 200 || response.status >= 300) throw new Error(value.error?.message || `HTTP ${response.status}`);
+              resolve(value);
+            } catch (error) { reject(error); }
+          },
+          onerror: () => fail('Cannot reach Boba server. Start boba serve and check settings.'),
+          ontimeout: () => fail('Server request timed out.'),
+          onabort: () => { cleanup(); reject(abortError()); },
+        });
       });
-    });
-  }
-
-  const pageTools = createPageTools(unsafeWindow, document, host);
-  async function execute(name, args, signal) {
-    check(signal);
-    if (['list_files', 'read_file', 'write_file', 'search_files', 'trash_file'].includes(name)) {
-      const body = { operation: name, path: args.path || '.' };
-      if (name === 'write_file') body.content = args.content;
-      if (name === 'search_files') body.query = args.query;
-      const { result } = await request('/api/files', body, signal);
-      if (name === 'read_file') {
-        const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
-        const limit = Math.min(20000, Math.max(1, Math.floor(Number(args.limit) || 20000)));
-        return { content: result.slice(offset, offset + limit), offset, total: result.length, truncated: offset + limit < result.length };
-      }
-      return result;
     }
-    if (name === 'offer_install') {
-      const result = await request('/api/install', { path: args.path }, signal);
+
+    const pageTools = platform.executePageTool || createPageTools(unsafeWindow, document, host);
+    async function execute(name, args, signal) {
       check(signal);
-      const entry = log('notice', `Saved ${args.path}. Installation link expires in five minutes. `);
-      const button = document.createElement('button');
-      button.textContent = 'Install in Violentmonkey';
-      button.addEventListener('click', () => GM_openInTab(result.url, { active: true }));
-      entry.append(button);
-      return { offered: args.path, expires_in: result.expires_in };
-    }
-    return pageTools(name, args, signal);
-  }
-  const agent = new Agent({ request, execute, onEvent(kind, value) {
-    if (kind === 'busy') {
-      busy = value;
-      $('send').disabled = value;
-      $('new').disabled = value;
-      $('gear').disabled = value;
-      $('stop').disabled = !value;
-    } else if (kind === 'status') $('status').textContent = value;
-    else if (kind === 'toolError') log('error', value);
-    else log(kind, value);
-  } });
-
-  async function refreshPrompts() {
-    try {
-      const health = await request('/api/health');
-      $('status').textContent = health.model;
-      const { prompts } = await request('/api/prompts');
-      $('prompts').replaceChildren(new Option('Workspace prompts…', ''));
-      for (const prompt of prompts) $('prompts').append(new Option(prompt.name, prompt.name));
-    } catch (error) { log('error', error.message); }
-  }
-  function toggle() {
-    const open = host.style.getPropertyValue('display') === 'none';
-    host.style.setProperty('display', open ? 'block' : 'none', 'important');
-    if (open) {
-      $('input').focus();
-      if (!settings.token) { showSettings(); }
-      else if (!busy) void refreshPrompts();
-    }
-  }
-  function showSettings() {
-    $('server').value = settings.server;
-    $('token').value = settings.token;
-    $('shortcut').value = settings.shortcut;
-    $('settings').style.display = $('settings').style.display === 'block' ? 'none' : 'block';
-  }
-  $('settings').addEventListener('submit', async event => {
-    event.preventDefault();
-    try {
-      settings = validateSettings({ server: $('server').value.trim(), token: $('token').value.trim(), shortcut: $('shortcut').value.trim() });
-      GM_setValue('settings', settings);
-      $('token').value = '';
-      $('settings').style.display = 'none';
-      await refreshPrompts();
-    } catch (error) { log('error', error.message); }
-  });
-  $('gear').addEventListener('click', showSettings);
-  $('close').addEventListener('click', toggle);
-  $('stop').addEventListener('click', () => agent.stop());
-  $('new').addEventListener('click', () => {
-    agent.messages = [{ role: 'system', content: SYSTEM }];
-    $('log').replaceChildren();
-    log('notice', 'New chat. Page changes remain. Automatic execution is ON.');
-    attachment = null;
-    $('attachment').textContent = '';
-  });
-  $('prompts').addEventListener('change', () => {
-    if ($('prompts').value) {
-      $('input').value = `/${$('prompts').value} ${$('input').value}`;
-      $('prompts').value = '';
-      $('input').focus();
-    }
-  });
-  let preparing = false;
-  async function send() {
-    if (busy || preparing) return;
-    const input = $('input').value.trim();
-    if (!input && !attachment) return;
-    preparing = true;
-    $('send').disabled = true;
-    $('new').disabled = true;
-    $('gear').disabled = true;
-    const controller = new AbortController();
-    // Prompt loading is cancellable too; the model loop takes over afterwards.
-    const onStop = () => controller.abort();
-    $('stop').disabled = false;
-    $('stop').addEventListener('click', onStop);
-    try {
-      let text = input;
-      if (text.startsWith('/')) {
-        const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
-        if (!match) throw new Error('Invalid prompt name');
-        const { prompts } = await request('/api/prompts', undefined, controller.signal);
-        const prompt = prompts.find(p => p.name === match[1]);
-        if (!prompt) throw new Error(`Prompt not found: ${match[1]}`);
-        const { result } = await request('/api/files', { operation: 'read_file', path: prompt.path }, controller.signal);
-        text = `User explicitly invokes workspace prompt ${prompt.name}:\n${result}\n\nAdditional user instructions:\n${match[2] || ''}`;
+      if (['list_files', 'read_file', 'write_file', 'search_files', 'trash_file'].includes(name)) {
+        const body = { operation: name, path: args.path || '.' };
+        if (name === 'write_file') body.content = args.content;
+        if (name === 'search_files') body.query = args.query;
+        const { result } = await request('/api/files', body, signal);
+        if (name === 'read_file') {
+          const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
+          const limit = Math.min(20000, Math.max(1, Math.floor(Number(args.limit) || 20000)));
+          return { content: result.slice(offset, offset + limit), offset, total: result.length, truncated: offset + limit < result.length };
+        }
+        return result;
       }
-      check(controller.signal);
-      const context = `Current page: ${location.href}\nTitle: ${document.title}\n\n${text}`;
-      const content = attachment ? [{ type: 'text', text: context }, { type: 'image_url', image_url: { url: attachment } }] : context;
-      log('user', input || '[Image attached]');
-      if (attachment) log('notice', 'Image attached to this message. Choose a vision-capable model in server config.');
-      $('input').value = '';
+      if (name === 'offer_install') {
+        const result = await request('/api/install', { path: args.path }, signal);
+        check(signal);
+        const entry = log('notice', `Saved ${args.path}. Installation link expires in five minutes. `);
+        const button = document.createElement('button');
+        button.textContent = 'Install in Violentmonkey';
+        button.addEventListener('click', () => GM_openInTab(result.url, { active: true }));
+        entry.append(button);
+        return { offered: args.path, expires_in: result.expires_in };
+      }
+      return pageTools(name, args, signal);
+    }
+    const agent = new Agent({ request, execute, onEvent(kind, value) {
+      if (kind === 'busy') {
+        busy = value;
+        $('send').disabled = value;
+        $('new').disabled = value;
+        $('gear').disabled = value;
+        $('stop').disabled = !value;
+      } else if (kind === 'status') $('status').textContent = disconnected ? 'Disconnected' : value;
+      else if (kind === 'toolError') log('error', value);
+      else log(kind, value);
+    } });
+
+    async function refreshPrompts() {
+      try {
+        const health = await request('/api/health');
+        $('status').textContent = health.model;
+        const { prompts } = await request('/api/prompts');
+        $('prompts').replaceChildren(new Option('Workspace prompts…', ''));
+        for (const prompt of prompts) $('prompts').append(new Option(prompt.name, prompt.name));
+      } catch (error) { log('error', error.message); }
+    }
+    function toggle() {
+      const open = host.style.getPropertyValue('display') === 'none';
+      host.style.setProperty('display', open ? 'block' : 'none', 'important');
+      if (open) {
+        $('input').focus();
+        if (!settings.token) { showSettings(); }
+        else if (!busy) void refreshPrompts();
+      }
+    }
+    function showSettings() {
+      $('server').value = settings.server;
+      $('token').value = settings.token;
+      $('shortcut').value = settings.shortcut;
+      $('settings').style.display = $('settings').style.display === 'block' ? 'none' : 'block';
+    }
+    $('settings').addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        settings = validateSettings({ server: $('server').value.trim(), token: $('token').value.trim(), shortcut: $('shortcut').value.trim() });
+        GM_setValue('settings', settings);
+        $('token').value = '';
+        $('settings').style.display = 'none';
+        await refreshPrompts();
+      } catch (error) { log('error', error.message); }
+    });
+    $('gear').addEventListener('click', showSettings);
+    $('close').addEventListener('click', platform.onClose || toggle);
+    $('stop').addEventListener('click', () => agent.stop());
+    $('new').addEventListener('click', () => {
+      agent.messages = [{ role: 'system', content: SYSTEM }];
+      $('log').replaceChildren();
+      log('notice', 'New chat. Page changes remain. Automatic execution is ON.');
       attachment = null;
       $('attachment').textContent = '';
-      await agent.run(content);
-    } catch (error) { log('error', error.name === 'AbortError' ? 'Stopped.' : error.message); }
-    finally {
-      preparing = false;
-      $('send').disabled = false;
-      $('new').disabled = false;
-      $('gear').disabled = false;
-      $('stop').disabled = true;
-      $('stop').removeEventListener('click', onStop);
+    });
+    $('prompts').addEventListener('change', () => {
+      if ($('prompts').value) {
+        $('input').value = `/${$('prompts').value} ${$('input').value}`;
+        $('prompts').value = '';
+        $('input').focus();
+      }
+    });
+    let preparing = false;
+    async function send() {
+      if (disconnected) { log('error', 'Target page disconnected. Rerun the DevTools snippet to reconnect.'); return; }
+      if (busy || preparing) return;
+      const input = $('input').value.trim();
+      if (!input && !attachment) return;
+      preparing = true;
+      $('send').disabled = true;
+      $('new').disabled = true;
+      $('gear').disabled = true;
+      const controller = new AbortController();
+      preparationController = controller;
+      // Prompt loading is cancellable too; the model loop takes over afterwards.
+      const onStop = () => controller.abort();
+      $('stop').disabled = false;
+      $('stop').addEventListener('click', onStop);
+      try {
+        let text = input;
+        if (text.startsWith('/')) {
+          const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
+          if (!match) throw new Error('Invalid prompt name');
+          const { prompts } = await request('/api/prompts', undefined, controller.signal);
+          const prompt = prompts.find(p => p.name === match[1]);
+          if (!prompt) throw new Error(`Prompt not found: ${match[1]}`);
+          const { result } = await request('/api/files', { operation: 'read_file', path: prompt.path }, controller.signal);
+          text = `User explicitly invokes workspace prompt ${prompt.name}:\n${result}\n\nAdditional user instructions:\n${match[2] || ''}`;
+        }
+        check(controller.signal);
+        const page = platform.getPageContext ? await platform.getPageContext(controller.signal) : { url: window.location.href, title: document.title };
+        check(controller.signal);
+        const context = `Current page: ${page.url}\nTitle: ${page.title}\n\n${text}`;
+        const content = attachment ? [{ type: 'text', text: context }, { type: 'image_url', image_url: { url: attachment } }] : context;
+        log('user', input || '[Image attached]');
+        if (attachment) log('notice', 'Image attached to this message. Choose a vision-capable model in server config.');
+        $('input').value = '';
+        attachment = null;
+        $('attachment').textContent = '';
+        await agent.run(content);
+      } catch (error) { log('error', error.name === 'AbortError' ? 'Stopped.' : error.message); }
+      finally {
+        preparing = false;
+        preparationController = null;
+        $('send').disabled = disconnected;
+        $('new').disabled = false;
+        $('gear').disabled = false;
+        $('stop').disabled = true;
+        $('stop').removeEventListener('click', onStop);
+      }
+    }
+    $('send').addEventListener('click', () => void send());
+    $('input').addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void send(); }
+    });
+    async function attachImage(file) {
+      if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG, or WebP image.');
+      if (file.size > 1500000) throw new Error('Image limit is 1.5 MB; resize or compress the screenshot first.');
+      const url = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Unable to read image'));
+        reader.readAsDataURL(file);
+      });
+      attachment = url;
+      $('attachment').textContent = `${file.name || 'Pasted image'} attached · click to remove`;
+    }
+    $('attach').addEventListener('click', () => $('image').click());
+    $('image').addEventListener('change', () => {
+      void attachImage($('image').files[0]).catch(e => log('error', e.message));
+      $('image').value = '';
+    });
+    $('input').addEventListener('paste', event => {
+      const item = Array.from(event.clipboardData?.items || []).find(i => i.type.startsWith('image/'));
+      if (item) { event.preventDefault(); void attachImage(item.getAsFile()).catch(e => log('error', e.message)); }
+    });
+    $('attachment').addEventListener('click', () => { attachment = null; $('attachment').textContent = ''; });
+    document.addEventListener('keydown', event => {
+      const parts = settings.shortcut.toLowerCase().split('+');
+      // Option changes event.key on macOS (e.g. B becomes a symbol). Use the
+      // physical letter key when available, falling back for synthetic events.
+      const key = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
+      if (key === parts.at(-1) && event.metaKey === parts.includes('meta') && event.ctrlKey === parts.includes('ctrl') && event.altKey === parts.includes('alt') && event.shiftKey === parts.includes('shift')) {
+        event.preventDefault(); toggle();
+      }
+    }, true);
+    GM_registerMenuCommand('Open Boba', toggle);
+    GM_registerMenuCommand('Boba settings', () => {
+      host.style.setProperty('display', 'block', 'important');
+      $('settings').style.display = 'none';
+      showSettings();
+    });
+    window.addEventListener('pagehide', () => { preparationController?.abort(); agent.stop(); }, { once: true });
+    if (platform.autoOpen) toggle();
+    return {
+      disconnect(reason = 'Target page disconnected. Rerun the DevTools snippet.') {
+        disconnected = true;
+        preparationController?.abort();
+        agent.stop();
+        $('send').disabled = true;
+        $('status').textContent = 'Disconnected';
+        log('error', reason);
+      },
+    };
+    } catch (error) {
+      console.error('[Boba] UI initialization failed', error);
+      GM_registerMenuCommand('Boba startup error', () => {
+        window.alert(`Boba could not initialize: ${error.message}\nSee the browser console for [Boba] errors.`);
+      });
     }
   }
-  $('send').addEventListener('click', () => void send());
-  $('input').addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void send(); }
-  });
-  async function attachImage(file) {
-    if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG, or WebP image.');
-    if (file.size > 1500000) throw new Error('Image limit is 1.5 MB; resize or compress the screenshot first.');
-    const url = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Unable to read image'));
-      reader.readAsDataURL(file);
-    });
-    attachment = url;
-    $('attachment').textContent = `${file.name || 'Pasted image'} attached · click to remove`;
+
+  // END SHARED RUNTIME
+
+  const runtime = { Agent, TOOLS, createPageTools, bounded, trimContext, interruptedResults, mountPanel };
+  if (typeof window === 'undefined' && typeof module !== 'undefined' && module.exports) {
+    module.exports = runtime;
+    return;
   }
-  $('attach').addEventListener('click', () => $('image').click());
-  $('image').addEventListener('change', () => {
-    void attachImage($('image').files[0]).catch(e => log('error', e.message));
-    $('image').value = '';
-  });
-  $('input').addEventListener('paste', event => {
-    const item = Array.from(event.clipboardData?.items || []).find(i => i.type.startsWith('image/'));
-    if (item) { event.preventDefault(); void attachImage(item.getAsFile()).catch(e => log('error', e.message)); }
-  });
-  $('attachment').addEventListener('click', () => { attachment = null; $('attachment').textContent = ''; });
-  document.addEventListener('keydown', event => {
-    const parts = settings.shortcut.toLowerCase().split('+');
-    // Option changes event.key on macOS (e.g. B becomes a symbol). Use the
-    // physical letter key when available, falling back for synthetic events.
-    const key = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
-    if (key === parts.at(-1) && event.metaKey === parts.includes('meta') && event.ctrlKey === parts.includes('ctrl') && event.altKey === parts.includes('alt') && event.shiftKey === parts.includes('shift')) {
-      event.preventDefault(); toggle();
-    }
-  }, true);
-  GM_registerMenuCommand('Open Boba', toggle);
-  GM_registerMenuCommand('Boba settings', () => {
-    host.style.setProperty('display', 'block', 'important');
-    $('settings').style.display = 'none';
-    showSettings();
-  });
-  window.addEventListener('pagehide', () => agent.stop(), { once: true });
-  } catch (error) {
-    console.error('[Boba] UI initialization failed', error);
-    GM_registerMenuCommand('Boba startup error', () => {
-      window.alert(`Boba could not initialize: ${error.message}\nSee the browser console for [Boba] errors.`);
-    });
-  }
+  mountPanel({ window, document, unsafeWindow, GM_getValue, GM_setValue,
+    GM_xmlhttpRequest, GM_registerMenuCommand, GM_openInTab });
 })();

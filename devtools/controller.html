@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Boba — DevTools controller</title>
+  <link rel="stylesheet" href="/devtools/controller.css">
+  <script src="/devtools/bridge.js" defer></script>
+  <script src="/devtools/runtime.js" defer></script>
+  <script src="/devtools/controller.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Boba DevTools</h1>
+    <p id="connection" role="status">Waiting for the target page…</p>
+    <button id="connect" disabled>Connect to this page</button>
+    <p class="hint">Enter your pairing token only in this localhost window. The target page is untrusted; automatic actions can change or submit page data.</p>
+  </header>
+</body>
+</html>

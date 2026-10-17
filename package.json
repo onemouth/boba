@@ -5,8 +5,9 @@
   "description": "Development tests for the no-build userscript",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check userscript/boba.user.js",
-    "test:browser": "node --test tests/*.firefox.cjs",
+    "check": "node --check userscript/boba.user.js && node --check devtools/boba-snippet.js && node --check devtools/controller.js && node scripts/build-devtools.cjs --check",
+    "build:devtools": "node scripts/build-devtools.cjs",
+    "test:browser": "node --test tests/*.firefox.cjs tests/*.chromium.cjs",
     "demo": "node tests/dev-server.cjs"
   },
   "devDependencies": {

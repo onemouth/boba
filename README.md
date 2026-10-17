@@ -49,6 +49,14 @@ Update the installed userscript to **0.1.2** or later and fully reload the page.
 
 Strict CSP/Trusted Types startup is covered by a real Firefox regression test with mocked GM APIs; this is not yet proof of the updated script working in the user's live YouTube tab. If the panel is still absent after updating, report that diagnostic menu's message. Opening the panel does not require the localhost server; arbitrary page JavaScript may still be blocked by site CSP.
 
+## Chrome DevTools Snippet
+
+No userscript manager is required for this entry point. Start/restart the updated Go server, then copy `devtools/boba-snippet.js` into **Chrome DevTools → Sources → Snippets** and run it on the target page.
+
+It opens a separate **localhost chat/controller window**. Confirm the target origin and enter the pairing token **only in that window**, never in the target page or snippet. The page bridge exposes DOM tools only; server API authentication and the no-CORS policy are unchanged.
+
+See [DevTools setup, security, and limitations](devtools/README.md). Reload ends the snippet session; rerun it to reconnect. Popup blockers, COOP, and page CSP can limit functionality. This is not the planned Firefox extension.
+
 ## Use
 
 Examples:
@@ -102,6 +110,7 @@ Files can be overwritten without approval. `trash_file` copies a regular file (u
 
 - [userscript/boba.user.js](userscript/boba.user.js): UI, tools, bounded agent loop; no bundler or runtime npm dependencies.
 - [server.go](server.go): authenticated OpenRouter proxy, files, prompts, expiring install links.
+- [devtools/](devtools/README.md): Chrome snippet, protected-origin controller, and page RPC adapter; static assets served by [devtools.go](devtools.go).
 - [workspace.go](workspace.go): traversal-resistant `os.Root` file operations and atomic writes.
 - [docs/MVP.md](docs/MVP.md): agreed scope and acceptance scenarios.
 
@@ -117,13 +126,15 @@ go vet ./...
 npm ci
 npm test
 npm run check
-npx playwright install firefox
+npm run build:devtools
+npx playwright install chromium firefox
 npm run test:browser
 ```
 
 - Go tests cover authentication, proxying/cancellation/errors, path confinement, prompts, writes, Trash behavior, and installation tickets. Trash tests use temporary directories, not your real Trash.
 - Node/jsdom tests cover tool-loop history, cancellation, bounds, DOM tools, and the full UI.
-- Playwright tests run a real Firefox engine, **with mocked GM APIs and model responses**, including image attachment and Stop.
+- Playwright tests run a real Firefox engine, **with mocked GM APIs and model responses**, including image attachment and Stop. Chromium snippet tests use a real Go server and temporary workspace with only OpenRouter mocked, covering cross-origin RPC, token separation, follow-up, Stop, reload disconnect, and strict CSP.
+- The userscript remains standalone/no-build. Developers regenerating DevTools artifacts run `npm run build:devtools`; committed assets let the Go server work without Node at runtime.
 - Live installed-userscript testing through the existing browser MCP in Zen has verified real localhost/OpenRouter requests, DOM inspection and modification, form filling without submission, follow-up translation, and workspace file writing. The output was independently checked at `~/Documents/boba/output/boba-smoke-links.md`. No GM/model mocks were used for this check.
 - Two installed Boba instances were detected on that page. Only one was paired and tested; disable the duplicate script/manager to avoid overlapping panels. The specific manager owning each instance was not independently identified.
 

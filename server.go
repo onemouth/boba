@@ -44,6 +44,8 @@ func newApp(cfg config, ws *workspace) *app {
 
 func (a *app) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /devtools/{$}", a.devtools)
+	mux.HandleFunc("GET /devtools/{asset}", a.devtools)
 	mux.HandleFunc("GET /api/health", a.auth(func(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]any{"ok": true, "model": a.cfg.Model, "workspace": "~/Documents/boba"})
 	}))
