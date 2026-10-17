@@ -9,7 +9,7 @@ function startBobaSnippet(runtime, createPeer, serverOrigin) {
   const session = crypto.randomUUID(); // Session binding only, never an API credential.
   const url = `${base.origin}/devtools/#${session}`;
   const pageTools = runtime.createPageTools(window, document);
-  const methods = new Set(['inspect_page', 'query_elements', 'click', 'type', 'scroll', 'execute_javascript']);
+  const methods = new Set(['inspect_page', 'query_elements', 'read_text', 'insert_text', 'set_style', 'remove_inserted', 'verify_dom', 'click', 'type', 'scroll', 'execute_javascript']);
   let popup = null;
   let peer = null;
   let disposed = false;

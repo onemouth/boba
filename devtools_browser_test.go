@@ -61,7 +61,37 @@ func TestDevtoolsBrowserFixture(t *testing.T) {
 			return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": name, "arguments": string(data)}}
 		}
 		message := map[string]any{"role": "assistant", "content": "Done"}
-		if step == 0 {
+		if strings.Contains(latest, "structured:") {
+			sourceID := ""
+			for _, item := range input.Messages[userIndex+1:] {
+				if item.Role != "tool" {
+					continue
+				}
+				var result struct {
+					Items []struct {
+						SourceID string `json:"source_id"`
+					} `json:"items"`
+				}
+				var text string
+				_ = json.Unmarshal(item.Content, &text)
+				if json.Unmarshal([]byte(text), &result) == nil && len(result.Items) > 0 && result.Items[0].SourceID != "" {
+					sourceID = result.Items[0].SourceID
+				}
+			}
+			switch step {
+			case 0:
+				message["tool_calls"] = []any{call("read", "read_text", map[string]any{"selector": "h1"})}
+			case 1:
+				message["tool_calls"] = []any{call("insert", "insert_text", map[string]any{"items": []any{map[string]any{"source_id": sourceID, "text": "繁體中文對照", "lang": "zh-Hant-TW"}}})}
+			case 2:
+				message["tool_calls"] = []any{call("style", "set_style", map[string]any{"source_ids": []string{sourceID}, "properties": map[string]string{"color": "red"}})}
+			case 3:
+				message["tool_calls"] = []any{call("verify", "verify_dom", map[string]any{"source_ids": []string{sourceID}})}
+			}
+			if message["tool_calls"] != nil {
+				message["content"] = nil
+			}
+		} else if step == 0 {
 			message["content"] = nil
 			message["tool_calls"] = []any{call("inspect", "inspect_page", map[string]any{})}
 		} else if step == 1 {

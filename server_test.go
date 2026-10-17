@@ -139,7 +139,7 @@ func TestProxyControlsCredentialsAndModel(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
-		if body["model"] != a.cfg.Model || body["stream"] != false {
+		if body["model"] != a.cfg.Model || body["stream"] != false || body["max_tokens"] != float64(a.cfg.MaxTokens) {
 			t.Errorf("upstream body = %+v", body)
 		}
 		respond(w, 200, map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "done"}, "finish_reason": "stop"}}})
@@ -153,6 +153,10 @@ func TestProxyControlsCredentialsAndModel(t *testing.T) {
 	w = apiRequest(a, "POST", "/v1/chat/completions", `{"model":"override","messages":[{}]}`, a.cfg.Token)
 	if w.Code != 400 {
 		t.Fatal("client overrode model")
+	}
+	w = apiRequest(a, "POST", "/v1/chat/completions", `{"max_tokens":999999,"messages":[{}]}`, a.cfg.Token)
+	if w.Code != 400 {
+		t.Fatal("client overrode output limit")
 	}
 }
 

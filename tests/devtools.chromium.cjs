@@ -163,6 +163,17 @@ test('Chromium strict CSP: snippet connects and structured tools work without pa
   // Runtime Function execution can be blocked even though the debugger launched
   // the snippet. Do not promise arbitrary-JS CSP bypass.
   assert.ok((await ui.evaluate(root => root.querySelector('#log').textContent)).includes('CSP'));
+  await send(ui, 'structured: add a Traditional Chinese counterpart to the heading without eval');
+  await waitReady(popup);
+  assert.equal(await page.locator('h1').evaluate(e => e.firstChild.textContent), 'Article');
+  assert.equal(await page.locator('h1 .boba-inserted-text').count(), 1, await ui.evaluate(root => root.querySelector('#log').textContent));
+  assert.equal(await page.locator('h1 .boba-inserted-text').textContent(), '繁體中文對照');
+  assert.equal(await page.locator('h1 .boba-inserted-text').getAttribute('lang'), 'zh-Hant-TW');
+  assert.equal(await page.locator('h1 .boba-inserted-text').evaluate(e => getComputedStyle(e).color), 'rgb(255, 0, 0)');
+  const successful = await ui.evaluate(root => [...root.querySelectorAll('#progress-history [data-state="succeeded"]')].map(e => e.textContent));
+  assert.ok(successful.some(text => text.includes('read_text')));
+  assert.ok(successful.some(text => text.includes('insert_text')));
+  assert.ok(successful.some(text => text.includes('verify_dom')));
 });
 
 test('Chromium snippet reports popup blocking and COOP restrictions', { timeout: 90000 }, async t => {

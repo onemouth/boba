@@ -46,12 +46,19 @@ No userscript update is required to use this version. If Boba is also installed 
 - Chat history is in memory. Controller settings, including its token, use **sessionStorage on the localhost origin**, not the target origin or shared snippet code. They are separate from Violentmonkey settings.
 - **Stop** cancels model requests, outstanding page-tool calls, and later steps. It cannot undo completed changes or reliably interrupt generated JavaScript that has already started.
 - Page tools have a 45-second response timeout. A slow/frozen page produces an error rather than waiting forever; underlying JavaScript may continue.
+- Long tasks use small complete batches. The shared agent handles `checkpoint` internally for multi-response prose, discards truncated completions, and retries a smaller batch at most twice within the 20-step budget. It never executes partial tool arguments or combines broken JavaScript fragments. The Go server defaults to `max_tokens: 16384` (configurable). After updating, restart the server, replace the saved snippet with the regenerated file, and open a fresh controller.
+
+## Progress and failure history
+
+The shared **Progress & history** view separates runtime acknowledgements, undispatched calls, failed reads, uncertain mutations and unverified model checkpoints. Follow-ups receive a compact ledger projection. Exact mutation repeats and changes to the same unresolved file are blocked until explicit user review; no raw credential or host-tool channel is added to the page bridge. See [ledger semantics and limits](../docs/progress.md).
+
+A disconnected controller may still display its old records until closed, but these are not automatically transferred to a new controller or reconnected target. New chat clears them without undoing page/file effects. Replace the snippet with the regenerated version and open a fresh controller to apply an update.
 
 ## Permissions and limitations
 
 This is a snippet, **not** a DevTools extension or privileged browser automation API:
 
-- DOM inspect/query/click/type/scroll run in the target page. Same-origin frame access remains subject to normal browser rules.
+- DOM inspect/query/click/type/scroll and [structured text/style tools](../docs/structured-dom.md) run in the target page. Same-origin frame access remains subject to normal browser rules. `read_text`, `insert_text`, `set_style`, `remove_inserted` and `verify_dom` do not use eval or arbitrary HTML and are available through the page-tool allowlist.
 - Generated JavaScript uses the target page's Function constructor. **Strict CSP can block it**, even when DevTools successfully launches the initial snippet. Boba reports the error; it does not relax CSP or claim success. Prefer structured DOM tools on these pages.
 - There is no tab-management, debugger, native screenshot, or filesystem API in the snippet. User-attached screenshots still work with a vision model. Host files go through the authenticated Go server.
 - Popup blockers can stop the first `window.open`. Click the page's **Open Boba** button to retry with a direct user gesture. If necessary, allow this popup for the page.

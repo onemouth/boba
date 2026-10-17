@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -19,11 +20,14 @@ import (
 	"time"
 )
 
+const defaultMaxTokens = 16384
+
 type config struct {
-	APIKey string `json:"api_key"`
-	Model  string `json:"model"`
-	Port   int    `json:"port"`
-	Token  string `json:"pairing_token"`
+	APIKey    string `json:"api_key"`
+	Model     string `json:"model"`
+	Port      int    `json:"port"`
+	Token     string `json:"pairing_token"`
+	MaxTokens int    `json:"max_tokens"`
 }
 
 func main() {
@@ -114,7 +118,7 @@ func run() error {
 }
 
 func initConfig(path string) error {
-	cfg := config{Model: "openai/gpt-4.1-mini", Port: 8787, Token: rand.Text()}
+	cfg := config{Model: "openai/gpt-4.1-mini", Port: 8787, Token: rand.Text(), MaxTokens: defaultMaxTokens}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -139,6 +143,10 @@ func loadConfig(path string) (config, error) {
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, err
+	}
+	cfg.MaxTokens = cmp.Or(cfg.MaxTokens, defaultMaxTokens)
+	if cfg.MaxTokens < 1 {
+		return cfg, errors.New("max_tokens must be a positive integer, or omitted for the 16384 default")
 	}
 	if cfg.APIKey == "" || cfg.Model == "" || len(cfg.Token) < 24 || cfg.Port < 1 || cfg.Port > 65535 {
 		return cfg, errors.New("config requires api_key, model, port (1–65535), and pairing_token (at least 24 characters)")

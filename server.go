@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
@@ -37,6 +38,7 @@ type app struct {
 }
 
 func newApp(cfg config, ws *workspace) *app {
+	cfg.MaxTokens = cmp.Or(cfg.MaxTokens, defaultMaxTokens)
 	return &app{cfg: cfg, ws: ws, upstream: "https://openrouter.ai/api/v1/chat/completions",
 		client:  &http.Client{Timeout: 150 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }},
 		tickets: make(map[string]installTicket)}
@@ -47,7 +49,7 @@ func (a *app) handler() http.Handler {
 	mux.HandleFunc("GET /devtools/{$}", a.devtools)
 	mux.HandleFunc("GET /devtools/{asset}", a.devtools)
 	mux.HandleFunc("GET /api/health", a.auth(func(w http.ResponseWriter, r *http.Request) {
-		respond(w, 200, map[string]any{"ok": true, "model": a.cfg.Model, "workspace": "~/Documents/boba"})
+		respond(w, 200, map[string]any{"ok": true, "model": a.cfg.Model, "max_tokens": a.cfg.MaxTokens, "workspace": "~/Documents/boba"})
 	}))
 	mux.HandleFunc("POST /v1/chat/completions", a.auth(a.chat))
 	mux.HandleFunc("POST /api/files", a.auth(a.files))
@@ -121,7 +123,7 @@ func (a *app) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload := map[string]any{"model": a.cfg.Model, "messages": input.Messages, "tools": input.Tools,
-		"stream": false, "max_tokens": 8192, "tool_choice": "auto"}
+		"stream": false, "max_tokens": a.cfg.MaxTokens, "tool_choice": "auto"}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		fail(w, 400, "invalid JSON")
