@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boba — Tiny Browser Agent
 // @namespace    https://boba.local
-// @version      0.1.1
+// @version      0.1.2
 // @description  Operate the current page with a local OpenRouter proxy. Automatic execution; use on trusted pages.
 // @match        http://*/*
 // @match        https://*/*
@@ -266,10 +266,14 @@ Keep responses concise and in the user's language. Report changes, saved paths, 
   }
 
   // No build step: Node tests import the same code shipped to Violentmonkey.
-  if (typeof module !== 'undefined' && module.exports) {
+  if (typeof window === 'undefined' && typeof module !== 'undefined' && module.exports) {
     module.exports = { Agent, TOOLS, createPageTools, bounded, trimContext, interruptedResults };
     return;
   }
+
+  try {
+  // Avoid a second panel when more than one userscript manager runs Boba.
+  if (document.querySelector('boba-panel')) return;
 
   const defaults = { server: 'http://127.0.0.1:8787', token: '', shortcut: 'Alt+Shift+B' };
   let settings = { ...defaults, ...GM_getValue('settings', {}) };
@@ -278,19 +282,50 @@ Keep responses concise and in the user's language. Report changes, saved paths, 
   const host = document.createElement('boba-panel');
   host.style.cssText = 'all:initial!important;position:fixed!important;right:20px!important;bottom:20px!important;z-index:2147483647!important;display:none!important';
   const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `
-    <style>
+  // Build UI with DOM APIs: innerHTML is a Trusted Types sink on sites
+  // such as YouTube. Do not create a Trusted Types policy or weaken site CSP.
+  function element(tag, attributes = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+    node.append(...children);
+    return node;
+  }
+  shadow.append(
+    element('style', {}, `
       :host{color-scheme:light}*{box-sizing:border-box}section{font:13px/1.5 system-ui,sans-serif;color:#242424;background:#faf9f6;width:380px;max-width:calc(100vw - 40px);height:530px;max-height:calc(100vh - 40px);border:1px solid #ddd7cb;border-radius:14px;box-shadow:0 14px 60px #0003;display:flex;flex-direction:column;overflow:hidden}
       header{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e4dfd5}strong{font-size:15px}header span{flex:1;color:#777;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}button,select{font:inherit;border:1px solid #d8d1c5;background:#fff;border-radius:6px;padding:5px 9px;cursor:pointer;color:#333}button:hover{background:#eee9df}button:disabled{opacity:.5;cursor:default}
       #log{overflow:auto;flex:1;padding:12px;min-height:80px}.entry{white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:12px;padding:8px 10px;border-radius:8px;background:#fff}.user{background:#eee7db}.tool{background:transparent;color:#777;font:11px/1.4 ui-monospace,monospace;padding:0 6px;margin-bottom:6px}.error{background:#fff0e9;color:#a43c24}.notice{font-size:11px;color:#736853;background:transparent;padding:0}
       footer{padding:10px;border-top:1px solid #e4dfd5}textarea{width:100%;resize:vertical;min-height:64px;max-height:150px;border:1px solid #d8d1c5;border-radius:8px;background:white;padding:9px;font:13px/1.5 system-ui;color:#222}textarea:focus{outline:2px solid #b9a787}.row{display:flex;gap:6px;align-items:center;margin-top:7px}.row select{min-width:0;flex:1}#send{background:#302a23;color:#fff}#stop{color:#a43c24}#attachment{font-size:11px;color:#777}#settings{display:none;padding:12px;border-bottom:1px solid #ddd7cb}label{display:block;margin-bottom:6px;font-size:11px}input:not([type=file]){width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;color:#222;background:#fff}#image{display:none}
-    </style>
-    <section aria-label="Boba chat">
-      <header><strong>Boba</strong><span id="status">Ready</span><button id="new" title="New chat">New</button><button id="gear" title="Settings">⚙</button><button id="close" title="Hide">×</button></header>
-      <form id="settings"><label>Local server<input id="server" autocomplete="off"></label><label>Pairing token<input id="token" type="password" autocomplete="off"></label><label>Shortcut (e.g. Alt+Shift+B)<input id="shortcut" autocomplete="off"></label><button type="submit">Save & connect</button></form>
-      <div id="log" role="log" aria-live="polite"></div>
-      <footer><textarea id="input" aria-label="Instructions" placeholder="What should I do on this page?"></textarea><div id="attachment"></div><div class="row"><select id="prompts" aria-label="Workspace prompt"><option value="">Workspace prompts…</option></select><button id="attach" title="Attach a screenshot or image">Image</button><button id="stop" disabled>Stop</button><button id="send">Send</button></div><input id="image" type="file" accept="image/png,image/jpeg,image/webp"></footer>
-    </section>`;
+    `),
+    element('section', { 'aria-label': 'Boba chat' },
+      element('header', {},
+        element('strong', {}, 'Boba'),
+        element('span', { id: 'status' }, 'Ready'),
+        element('button', { id: 'new', title: 'New chat' }, 'New'),
+        element('button', { id: 'gear', title: 'Settings' }, '⚙'),
+        element('button', { id: 'close', title: 'Hide' }, '×'),
+      ),
+      element('form', { id: 'settings' },
+        element('label', {}, 'Local server', element('input', { id: 'server', autocomplete: 'off' })),
+        element('label', {}, 'Pairing token', element('input', { id: 'token', type: 'password', autocomplete: 'off' })),
+        element('label', {}, 'Shortcut (e.g. Alt+Shift+B)', element('input', { id: 'shortcut', autocomplete: 'off' })),
+        element('button', { type: 'submit' }, 'Save & connect'),
+      ),
+      element('div', { id: 'log', role: 'log', 'aria-live': 'polite' }),
+      element('footer', {},
+        element('textarea', { id: 'input', 'aria-label': 'Instructions', placeholder: 'What should I do on this page?' }),
+        element('div', { id: 'attachment' }),
+        element('div', { class: 'row' },
+          element('select', { id: 'prompts', 'aria-label': 'Workspace prompt' },
+            element('option', { value: '' }, 'Workspace prompts…')),
+          element('button', { id: 'attach', title: 'Attach a screenshot or image' }, 'Image'),
+          element('button', { id: 'stop', disabled: '' }, 'Stop'),
+          element('button', { id: 'send' }, 'Send'),
+        ),
+        element('input', { id: 'image', type: 'file', accept: 'image/png,image/jpeg,image/webp' }),
+      ),
+    ),
+  );
   document.documentElement.append(host);
   const $ = id => shadow.getElementById(id);
   function log(kind, text) {
@@ -516,4 +551,10 @@ Keep responses concise and in the user's language. Report changes, saved paths, 
     showSettings();
   });
   window.addEventListener('pagehide', () => agent.stop(), { once: true });
+  } catch (error) {
+    console.error('[Boba] UI initialization failed', error);
+    GM_registerMenuCommand('Boba startup error', () => {
+      window.alert(`Boba could not initialize: ${error.message}\nSee the browser console for [Boba] errors.`);
+    });
+  }
 })();

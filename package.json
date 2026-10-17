@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --test tests/*.test.cjs",
     "check": "node --check userscript/boba.user.js",
-    "test:browser": "node --test tests/browser.firefox.cjs",
+    "test:browser": "node --test tests/*.firefox.cjs",
     "demo": "node tests/dev-server.cjs"
   },
   "devDependencies": {

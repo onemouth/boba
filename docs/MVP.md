@@ -1,6 +1,6 @@
 # Boba MVP
 
-Status: Initial implementation built and automated tests passing. Live Violentmonkey/OpenRouter integration is pending; see README.md for setup and validation limits.
+Status: Initial implementation built and automated tests passing. A live installed-userscript check in Zen verified real OpenRouter tool calls, DOM modifications, form filling without submission, follow-up translation, and workspace writes. Two installed instances were found; only one was paired/tested, and manager ownership was not independently identified. Generated-script installation, strict CSP, full-page translation, and settings persistence still need validation; see README.md.
 
 ## Goal
 

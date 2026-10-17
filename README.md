@@ -43,6 +43,12 @@ The server listens on `127.0.0.1`, not your LAN. For a different config location
 
 The default shortcut is `Alt+Shift+B`. If your browser intercepts it, use the menu command and configure another shortcut. Existing saved shortcuts are preserved when updating; change an older `Meta+Shift+B` setting manually in Boba settings. Shortcut syntax uses `Meta`, `Ctrl`, `Alt`, `Shift` plus one letter.
 
+### Panel missing on YouTube / strict-policy pages
+
+Update the installed userscript to **0.1.2** or later and fully reload the page. UI construction now uses DOM APIs instead of `innerHTML`, so it does not need a Trusted Types policy or relaxed CSP. The browser startup path also ignores a site's CommonJS-like `module` object, prevents duplicate panels, and logs `[Boba] UI initialization failed` plus a **Boba startup error** menu command if initialization fails.
+
+Strict CSP/Trusted Types startup is covered by a real Firefox regression test with mocked GM APIs; this is not yet proof of the updated script working in the user's live YouTube tab. If the panel is still absent after updating, report that diagnostic menu's message. Opening the panel does not require the localhost server; arbitrary page JavaScript may still be blocked by site CSP.
+
 ## Use
 
 Examples:
@@ -75,6 +81,8 @@ cp examples/prompts/*.md ~/Documents/boba/prompts/
 ```
 
 Use the prompt dropdown or type `/translate additional instructions`. Nested prompt names such as `/writing/rewrite` are supported. Prompt files are instructions, not executable trusted plugins.
+
+For paragraph-aligned bilingual reading, use `/bilingual 翻譯目前文章，保留原文並加入繁體中文對照`. The included `bilingual.md` adapts the Firefox bilingual-EPUB skill to Boba's tools: stable paragraph indices, batched translation, idempotent injection, same-origin iframe readers, pagination checks, and optional JSON/Markdown/HTML export. Automatic screenshots and EPUB packaging are explicitly unsupported; navigation and visual checks must be reported honestly. Close/reopen the panel to refresh the prompt picker after adding a file. No server restart or userscript update is required.
 
 ### Images / vision
 
@@ -116,7 +124,8 @@ npm run test:browser
 - Go tests cover authentication, proxying/cancellation/errors, path confinement, prompts, writes, Trash behavior, and installation tickets. Trash tests use temporary directories, not your real Trash.
 - Node/jsdom tests cover tool-loop history, cancellation, bounds, DOM tools, and the full UI.
 - Playwright tests run a real Firefox engine, **with mocked GM APIs and model responses**, including image attachment and Stop.
-- The local demo has also been checked through the existing browser MCP in the running Firefox-based browser. This is **not** proof of live Violentmonkey or OpenRouter integration.
+- Live installed-userscript testing through the existing browser MCP in Zen has verified real localhost/OpenRouter requests, DOM inspection and modification, form filling without submission, follow-up translation, and workspace file writing. The output was independently checked at `~/Documents/boba/output/boba-smoke-links.md`. No GM/model mocks were used for this check.
+- Two installed Boba instances were detected on that page. Only one was paired and tested; disable the duplicate script/manager to avoid overlapping panels. The specific manager owning each instance was not independently identified.
 
 Run a safe, deterministic UI demo:
 
@@ -129,8 +138,9 @@ It has no API key or host file access. Its model and GM bridge are explicitly mo
 
 ### Remaining live validation
 
-- Actual Zen + Violentmonkey injection, private GM storage, localhost requests, and CSP behavior.
-- Your OpenRouter key/model completing the five acceptance scenarios.
+- Confirm that only the intended Violentmonkey installation remains enabled; test private GM settings persistence after reload.
+- Strict-CSP sites, actual screen/image model understanding, and full-page translation beyond the small fixture.
+- Generated userscript acceptance scenario (the live check covered the other scenarios on a small local fixture).
 - Violentmonkey installation handoff from expiring localhost URLs.
 - Automatic screenshot approach, if required later.
 
