@@ -43,7 +43,7 @@ Suggested directories:
 - output/
 - userscripts/
 
-File operations are confined to this root, including protection against traversal and symlink escape. Writes and overwrites require no approval. Deletion moves files to macOS Trash rather than permanently removing them.
+File operations are confined to this root, including protection against traversal and symlink escape. Writes and overwrites require no approval. The dedicated `trash_file` tool moves files to macOS Trash rather than permanently removing them. From 0.1.7, `edit_file` adds atomic unique literal replacement and `bash` adds an OS-enforced macOS workspace sandbox, with no network or inherited server environment. Shell deletion/truncation can permanently remove workspace data; the Trash guarantee applies only to `trash_file`. See [host tools and sandbox limitations](host-tools.md).
 
 ## Tools
 

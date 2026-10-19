@@ -107,8 +107,18 @@ test('Chromium snippet: protected controller, actual DOM/files, follow-up, Stop,
   await waitReady(popup);
   assert.equal(await page.locator('#notes').inputValue(), 'Follow-up kept the name');
   assert.equal(await page.locator('#name').inputValue(), 'Boba');
+  if (process.platform === 'darwin') {
+    await send(ui, 'host-tools: write, precisely edit, then append using the workspace sandbox shell');
+    await waitReady(popup);
+    const shellFile = await fetch(base + '/api/files', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'read_file', path: 'output/sandbox-shell.txt' }) });
+    assert.equal((await shellFile.json()).result, 'edited shell');
+    const progress = await ui.evaluate(root => root.querySelector('#progress-history').textContent);
+    assert.ok(progress.includes('edit_file · succeeded'));
+    assert.ok(progress.includes('bash · succeeded'));
+    assert.ok(!(await page.evaluate(() => JSON.stringify(window.testPortTraffic))).includes('sandbox-shell.txt'));
+  }
   assert.deepEqual(await (await fetch(base + '/fixture/status')).json(), { cancelled: false, wrong_context: false });
-  assert.ok(!targetRequests.some(url => /\/api\/files|\/v1\/chat/.test(url)));
+  assert.ok(!targetRequests.some(url => /\/api\/files|\/api\/bash|\/v1\/chat/.test(url)));
   assert.equal(await page.evaluate(() => sessionStorage.getItem('boba.devtools.settings')), null);
   assert.ok(!(await page.evaluate(() => JSON.stringify(window.testPortTraffic))).includes(token));
 

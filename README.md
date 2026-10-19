@@ -96,6 +96,14 @@ Try: 「保留原文，使用結構化工具逐段加入繁體中文對照，先
 
 See [tool arguments, safety, cleanup and limits](docs/structured-dom.md). Existing workspace prompts, including `bilingual.md`, are unchanged. Update the userscript and reload, or regenerate/replace the snippet and restart the server for its embedded controller assets.
 
+### File editing and sandboxed shell
+
+Userscript **0.1.7+** adds `edit_file` (one unique exact-text replacement, atomic write) and `bash` (macOS OS-enforced workspace sandbox). Bash has no network or inherited server environment; system tools/runtime files are readable, but private files and Homebrew/toolchain installations outside the workspace are not automatically available. Unsupported platforms or sandbox failure never fall back to unrestricted execution.
+
+Bash defaults to 60 seconds (maximum 120), with bounded output and Stop/process-group cancellation. Nonzero exit/timeout may leave partial effects and is tracked as uncertain. **Shell `rm` permanently deletes workspace files; only `trash_file` moves them to Trash.** Detached daemons and resource exhaustion are outside this lightweight sandbox's guarantees.
+
+Update the userscript, reload, and restart the Go server. See [host tool usage, policy and limitations](docs/host-tools.md).
+
 ### Workspace prompts
 
 The server creates:
@@ -136,10 +144,11 @@ Files can be overwritten without approval. `trash_file` copies a regular file (u
 - [userscript/boba.user.js](userscript/boba.user.js): UI, tools, bounded agent loop; no bundler or runtime npm dependencies.
 - [server.go](server.go): authenticated OpenRouter proxy, files, prompts, expiring install links.
 - [devtools/](devtools/README.md): Chrome snippet, protected-origin controller, and page RPC adapter; static assets served by [devtools.go](devtools.go).
-- [workspace.go](workspace.go): traversal-resistant `os.Root` file operations and atomic writes.
+- [workspace.go](workspace.go): traversal-resistant `os.Root` file operations, exact editing and atomic writes.
+- [bash.go](bash.go): authenticated, deny-default macOS sandboxed shell with bounded output and cancellation.
 - [docs/MVP.md](docs/MVP.md): agreed scope and acceptance scenarios.
 
-The proxy owns model/credentials; the userscript sends only messages and tool definitions. File tools are confined to `~/Documents/boba`, including symlink resolution. The page receives no host-tool bridge. These precautions are **not** a sandbox against malicious generated JavaScript or compromised browser/page code.
+The proxy owns model/credentials; the userscript sends only messages and tool definitions. File tools are confined to `~/Documents/boba`, including symlink resolution. The page receives no host-tool bridge. The shell has a separate [OS workspace sandbox](docs/host-tools.md); that boundary does **not** sandbox generated browser JavaScript, prevent prompt injection, or make compromised page code trustworthy.
 
 Page JavaScript uses the page's Function constructor. CSP may block it, which is reported as a tool error. Structured DOM tools remain preferable. Same-origin iframe inspection is supported; cross-origin frames and protected cookies/page objects remain subject to browser restrictions. Tools use synthetic events, so some sites may require real user gestures. Full document navigation terminates the current task; SPA navigation can continue while the agent survives.
 

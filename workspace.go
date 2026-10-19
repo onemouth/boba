@@ -88,6 +88,44 @@ func (w *workspace) read(name string) (string, error) {
 }
 
 func (w *workspace) write(name, content string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writeLocked(name, content)
+}
+
+// edit rejects ambiguous (including overlapping) matches and replaces atomically.
+func (w *workspace) edit(name, oldText, newText string) error {
+	if oldText == "" || !utf8.ValidString(newText) || strings.ContainsRune(newText, 0) {
+		return errors.New("old_text must be nonempty and new_text must be UTF-8 text without NUL")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	name, err := localPath(name)
+	if err != nil {
+		return err
+	}
+	info, err := w.root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("edit_file requires a regular file, not a symlink or directory")
+	}
+	text, err := w.read(name)
+	if err != nil {
+		return err
+	}
+	start := strings.Index(text, oldText)
+	if start < 0 {
+		return errors.New("old_text not found; read the file again")
+	}
+	if strings.Contains(text[start+1:], oldText) {
+		return errors.New("old_text is ambiguous; include more surrounding text")
+	}
+	return w.writeLocked(name, text[:start]+newText+text[start+len(oldText):])
+}
+
+func (w *workspace) writeLocked(name, content string) error {
 	name, err := localPath(name)
 	if err != nil {
 		return err
@@ -95,8 +133,6 @@ func (w *workspace) write(name, content string) error {
 	if name == "." || len(content) > maxFileBytes {
 		return errors.New("invalid filename or content exceeds 1 MiB")
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	if err := w.root.MkdirAll(path.Dir(name), 0o700); err != nil {
 		return err
 	}

@@ -61,7 +61,16 @@ func TestDevtoolsBrowserFixture(t *testing.T) {
 			return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": name, "arguments": string(data)}}
 		}
 		message := map[string]any{"role": "assistant", "content": "Done"}
-		if strings.Contains(latest, "structured:") {
+		if strings.Contains(latest, "host-tools:") {
+			if step == 0 {
+				message["content"] = nil
+				message["tool_calls"] = []any{
+					call("write-host", "write_file", map[string]any{"path": "output/sandbox-shell.txt", "content": "original"}),
+					call("edit-host", "edit_file", map[string]any{"path": "output/sandbox-shell.txt", "old_text": "original", "new_text": "edited"}),
+					call("bash-host", "bash", map[string]any{"command": "printf ' shell' >> output/sandbox-shell.txt; cat output/sandbox-shell.txt", "timeout": 5}),
+				}
+			}
+		} else if strings.Contains(latest, "structured:") {
 			sourceID := ""
 			for _, item := range input.Messages[userIndex+1:] {
 				if item.Role != "tool" {

@@ -53,6 +53,7 @@ func (a *app) handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /v1/chat/completions", a.auth(a.chat))
 	mux.HandleFunc("POST /api/files", a.auth(a.files))
+	mux.HandleFunc("POST /api/bash", a.auth(a.bash))
 	mux.HandleFunc("GET /api/prompts", a.auth(a.prompts))
 	mux.HandleFunc("POST /api/install", a.auth(a.install))
 	mux.HandleFunc("GET /api/userscript", a.auth(func(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +175,8 @@ func (a *app) files(w http.ResponseWriter, r *http.Request) {
 		Path      string `json:"path"`
 		Content   string `json:"content"`
 		Query     string `json:"query"`
+		OldText   string `json:"old_text"`
+		NewText   string `json:"new_text"`
 	}
 	if err := decode(w, r, &input); err != nil {
 		fail(w, 400, err.Error())
@@ -189,6 +192,9 @@ func (a *app) files(w http.ResponseWriter, r *http.Request) {
 	case "write_file":
 		err = a.ws.write(input.Path, input.Content)
 		result = map[string]any{"written": input.Path}
+	case "edit_file":
+		err = a.ws.edit(input.Path, input.OldText, input.NewText)
+		result = map[string]any{"edited": input.Path}
 	case "search_files":
 		result, err = a.ws.search(r.Context(), input.Path, input.Query)
 	case "trash_file":

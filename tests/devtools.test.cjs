@@ -56,7 +56,7 @@ test('a page cannot invoke controller/host capabilities through the RPC port', a
   let closed = false;
   const client = createBobaPeer(channel.port1, { onDisconnect: () => { closed = true; }, timeoutMs: 10 });
   t.after(() => { client.close(); channel.port2.close(); });
-  channel.port2.postMessage({ type: 'call', id: 'attacker', method: 'write_file', args: { path: 'owned', content: 'bad' } });
+  for (const method of ['write_file', 'edit_file', 'bash']) channel.port2.postMessage({ type: 'call', id: 'attacker-' + method, method, args: { path: 'owned', content: 'bad', command: 'bad' } });
   channel.port2.postMessage({ type: 'result', id: 'unrequested', ok: true, value: 'forged' });
   await assert.rejects(client.call('inspect_page'), /timed out/);
   assert.equal(closed, false);
