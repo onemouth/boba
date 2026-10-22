@@ -1,55 +1,51 @@
-# Workspace editing and sandboxed bash (0.1.7+)
+# File tools and shell sandbox
 
-The agent exposes the Pi-style core capabilities as `read_file`, `write_file`, `edit_file`, and `bash`, alongside existing page/workspace tools. Both userscript and DevTools controller dispatch these host operations directly to the authenticated Go server. Target-page RPC cannot call host capabilities.
+Host tools are available through both browser entry points. They call the authenticated Go server directly, never through target-page RPC. File paths are relative to `~/Documents/boba`.
 
-Update to userscript **0.1.7**, reload the page, and restart `go run . serve`. DevTools users must restart the server for updated embedded assets and replace/rerun the generated snippet as usual. Existing pairing credentials and custom shortcuts are retained. No workspace prompts are modified.
+| Tool | Behavior |
+| --- | --- |
+| `list_files` | List up to 500 directory entries. |
+| `search_files` | Search text and filenames with bounded results. |
+| `read_file` | Read a UTF-8 file up to 1 MiB; use `offset`/`limit` for chunks. |
+| `write_file` | Create or overwrite up to 1 MiB atomically; create parent directories. Does not append. |
+| `edit_file` | Replace one unique literal match atomically. |
+| `trash_file` | Copy a regular file up to 32 MiB to macOS Trash, then remove the source after sync. No directories or symlinks; copy failures preserve the original. |
+| `bash` | Run a shell command inside the macOS workspace sandbox. |
 
-## `edit_file`
+## Exact editing
 
 ```json
 {"path":"output/report.md","old_text":"Exact existing paragraph","new_text":"Revised paragraph"}
 ```
 
-- Existing regular UTF-8 file, at most 1 MiB; paths remain workspace-relative and protected by `os.Root`.
-- Exactly one literal match, including whitespace. Missing, duplicate and overlapping matches are rejected without writing. Read again and supply more context rather than retrying a guessed replacement.
-- Empty `new_text` deletes the matched text. Empty `old_text` is rejected.
-- Final-component symlinks, directories, binary/NUL input and oversized results are rejected.
-- Read/check/write is serialized against the server's write/edit/trash operations and replacement is atomic. This is not a compare-and-swap transaction against external editors or concurrent shell processes.
-- `/api/files` operation `edit_file` returns `{ "result": { "edited": "output/report.md" } }` on acknowledgement.
+Read the file first. Missing, duplicate or overlapping matches are rejected without writing; include more context rather than guessing. Empty `old_text` is invalid; empty `new_text` deletes the match. Files must be regular UTF-8 text, with no NUL, and fit the 1 MiB limit. Final-component symlinks are rejected.
 
-## `bash`
+Read/check/write is serialized against the server's write/edit/trash operations. Atomic replacement does not provide compare-and-swap protection against external editors or concurrent shell processes.
+
+## Sandboxed bash
 
 ```json
 {"command":"printf 'name,value\\nexample,1\\n' > output/data.csv; sort output/data.csv","timeout":10}
 ```
 
-Authenticated `POST /api/bash` takes `command` and optional `timeout`. Commands run automatically with no approval prompt. The default timeout is 60 seconds, permitted range 1–120. Each call starts a fresh noninteractive `/bin/bash --noprofile --norc`; shell variables/cwd do not persist between calls.
+Each call starts a fresh noninteractive `/bin/bash --noprofile --norc`. Cwd and shell variables do not persist. Timeout defaults to 60 seconds, with a range of 1–120.
 
-### OS-enforced boundary
+### Access policy
 
-This implementation is **macOS-only**, using `/usr/bin/sandbox-exec` with a deny-default Seatbelt profile. It does not merely set cwd or validate command strings. Unsupported platforms, missing executables and sandbox startup errors never fall back to unrestricted execution. Apple has deprecated sandbox-exec; future OS compatibility is not guaranteed.
+- **macOS only:** `/usr/bin/sandbox-exec` applies a deny-default OS policy. Missing support or startup failure never falls back to unrestricted execution. This deprecated macOS facility may require replacement on future OS versions.
+- User data is readable/writable only within the workspace; outside symlink targets are denied. Standard system executable/runtime trees are readable, including basic tools such as `cat`, `sort`, `sed` and `awk`. Root directory listing is allowed for runtime startup; this is not a chroot.
+- Network access—including localhost—and general Mach/GUI service access are denied. Children inherit the sandbox.
+- Environment is reset to a fixed system PATH, workspace HOME/TMPDIR, locale and TERM. Server secrets and environment variables are not inherited. Keep `config.json` outside the workspace.
+- Homebrew, Xcode, Python/Node dependencies, user configuration and system temp directories outside allowed paths are not automatically available. An installed binary may still have unsupported dependencies. Use workspace HOME/TMPDIR and do not automatically broaden policy to accommodate commands.
 
-- Workspace is both the initial cwd and the only permitted user-data read/write tree. Symlink targets outside it are denied by OS policy. A replaced workspace directory is rejected before launch.
-- A narrow set of standard system executable/runtime trees is readable, including `/bin`, `/usr/bin`, system libraries and shared runtime data. Listing the filesystem root is permitted for runtime startup; private-file contents and metadata outside allowed paths are not generally accessible. This is not a chroot, and public OS files remain visible.
-- No network access, **including localhost**. No general Mach/GUI automation service access or process/environment introspection permission is granted. Children inherit the OS sandbox.
-- A fresh environment contains only a fixed system PATH, workspace HOME/TMPDIR, locale and TERM. Server environment variables, pairing tokens and API keys are not inherited. Keep `config.json` outside the workspace as before.
-- Standard shell builtins, pipes, redirection and basic system tools such as `cat`, `sort`, `sed` and `awk` are the initial supported environment. Homebrew installations, Xcode tools, Python/Node package trees, system temp directories and per-user configuration outside the workspace are **not** automatically allowlisted. A system binary being present does not guarantee all its dependencies/features work. Do not broaden policy in response to generated commands automatically.
-- Workspace executables may run if their interpreters/runtime dependencies are available under that same policy. HOME/TMPDIR point to the workspace; tools should use these instead of assuming `/tmp` is writable.
+Do not place sensitive data or hardlinks to outside sensitive files in the workspace: files already present there are in the allowed scope.
 
-### Effects, output and Stop
+### Output, cancellation and destructive effects
 
-Results contain `output` (combined stdout/stderr), `exit_code`, `truncated`, `timed_out` and `cancelled`. Output is drained but retained only up to 16,000 bytes, with an additional serialized-JSON budget for control characters. Invalid UTF-8 is replaced. Large results must be saved to workspace files and read in chunks; there is no automatic full-log transcript file.
+Results contain combined `output`, `exit_code`, `truncated`, `timed_out` and `cancelled`. Retained output is capped at 16,000 bytes and a serialized-JSON budget; invalid UTF-8 is replaced. Redirect large output to workspace files and read it in chunks.
 
-Nonzero exit, timeout or cancellation can leave partial effects. The execution ledger marks those operations **uncertain**, retains returned diagnostics in model history, and blocks conflicting workspace mutations until user review. Reads remain possible for inspection. Exit 0 is an acknowledgement, not independent proof of task success or absence of background work. Tool-argument bodies (commands/replacement text) and shell output are not copied into the progress ledger; user-instruction excerpts can still contain sensitive text, and model/tool history retains arguments/results.
+Nonzero exit, timeout or cancellation may leave partial changes and are tracked as [uncertain](progress.md). Exit 0 acknowledges the command, not task correctness. Tool arguments/results remain in model history; they are not copied wholesale into the progress ledger.
 
-Stop aborts the HTTP request; request cancellation/timeout kills the shell's process group. Remaining same-group children are also killed after normal completion, and an inherited-output-pipe timeout bounds waiting for background processes. **Detached children that create a new session/process group are not guaranteed to stop.** They remain sandboxed, but this is not a VM, fork-bomb protection, disk/memory quota, or full resource-isolation service. Do not run persistent daemons or untrusted workloads requiring those guarantees.
+Stop aborts the HTTP request and kills the shell's process group. Same-group children are also stopped after completion, with a bounded wait for open output pipes. **Detached processes are not guaranteed to stop**, though they remain sandboxed. Do not launch background jobs or daemons. This is not a VM, fork-bomb defense, disk/memory quota or full resource-isolation service.
 
-**Deletion is different from `trash_file`: shell `rm`, truncation and other writes can permanently destroy workspace data.** The OS sandbox restricts where these effects can occur; it does not convert them into Trash operations. Prefer `trash_file` for intentional file deletion. Only that dedicated tool guarantees its existing copy-to-Trash behavior.
-
-Sandboxing host commands does not sandbox browser JavaScript or solve prompt injection. Malicious instructions can still cause unwanted actions within allowed browser/workspace capabilities. Use trusted pages and keep sensitive material out of the workspace. Files already present there, including hardlinks sharing an inode with an outside file, are in the allowed data scope; do not populate it with hardlinks to sensitive external data.
-
-## Tests
-
-macOS integration tests execute the actual OS sandbox against temporary workspaces: permitted file processing, denied private paths/metadata and symlink escapes, a denied connection to a live loopback server, denied system-service access, stripped environment, output bounds, exit codes, timeout and process-group cancellation. Go tests never use the real Trash/configuration.
-
-JS tests cover schemas, host dispatch, failed-shell diagnostics, uncertainty/replay guards, Stop and progress privacy. Chromium tests run the real localhost Go controller and actual sandbox/edit operations with a mocked model. No paid model calls or compatibility guarantees for every macOS version/toolchain are implied.
+**Shell `rm`, truncation and other destructive writes can permanently destroy workspace data. Only `trash_file` moves files to Trash.** The sandbox restricts where effects occur; it does not undo them or prevent prompt injection into allowed actions.
